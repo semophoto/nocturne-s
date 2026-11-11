@@ -465,6 +465,27 @@ public class CareLinkConnectorServiceTests
         handler.Requests.Count(r => r.Url == CareLinkFakeHandler.TokenUrl).Should().Be(1);
     }
 
+    /// <summary>
+    /// The rotated refresh token is the only one Auth0 still accepts, so a sync that refreshes and
+    /// then fails to fetch data must still store it. Otherwise the next refresh redeems the stored,
+    /// already-rotated token, is refused, and the connector needs a new interactive sign-in.
+    /// </summary>
+    [Fact]
+    public async Task SyncDataAsync_WhenTheDataFetchFailsAfterARefresh_StillStoresTheRotatedRefreshToken()
+    {
+        var handler = new CareLinkFakeHandler();
+        var fixture = new ServiceFixture(handler);
+
+        var result = await fixture.Service.SyncDataAsync(
+            new SyncRequest { DataTypes = [SyncDataType.Glucose] }, fixture.Config, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        fixture.ConfigService.Verify(s => s.SaveRuntimeSecretsAsync(
+            "CareLink",
+            It.Is<Dictionary<string, string>>(secrets => secrets["refresh_token"] == "rotated-refresh-token"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     /// <summary>Leaves only the alarm step able to publish, so its failure cannot be confused for another step's.</summary>
     private static CareLinkConnectorConfiguration AlarmOnlyConfiguration() => new()
     {
