@@ -37,6 +37,12 @@ public static class CareLinkConstants
         public const string CarePartnerOus = "CARE_PARTNER_OUS";
     }
 
+    /// <summary>
+    /// The secrets the connector writes itself: the Auth0 session a sign-in produces and each
+    /// refresh rotates. The settings form never sends them.
+    /// </summary>
+    public static readonly string[] SessionSecretKeys = ["refresh_token", "client_id", "token_url", "audience"];
+
     public const int StaleDataThresholdMinutes = 20;
 
     /// <summary>
