@@ -6,6 +6,7 @@ using Nocturne.API.Attributes;
 using Nocturne.API.Authorization;
 using Nocturne.API.Extensions;
 using Nocturne.API.Services.Connectors;
+using Nocturne.Connectors.CareLink.Configurations;
 using Nocturne.Connectors.Core.Utilities;
 using OpenApi.Remote.Attributes;
 using Nocturne.Connectors.Core.Interfaces;
@@ -410,6 +411,7 @@ public class ConfigurationController : ControllerBase
 
         try
         {
+            secrets = await KeepConnectorSessionSecretsAsync(connectorName, secrets, ct);
             await _configService.SaveSecretsAsync(connectorName, secrets, modifiedBy, ct);
             return NoContent();
         }
@@ -418,6 +420,47 @@ public class ConfigurationController : ControllerBase
             _logger.LogWarning(ex, "Failed to save secrets - encryption not configured");
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    /// <summary>
+    /// Secrets a connector stores for itself, keyed by canonical connector name.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> ConnectorSessionSecretKeys = new()
+    {
+        [ConnectorNames.Canonical(nameof(ConnectSource.CareLink))] = CareLinkConstants.SessionSecretKeys,
+    };
+
+    /// <summary>
+    /// Carries the connector's own session secrets over into a save from the settings form.
+    /// </summary>
+    /// <remarks>
+    /// A save replaces the whole stored secrets document, and the form sends only the fields it
+    /// shows. Without this, saving the CareLink settings deleted the refresh token the connector
+    /// stores, and the next sync could only fall back to a CAPTCHA-blocked password login. A save
+    /// that supplies its own refresh token starts a new session, so nothing is carried over.
+    /// A blank stored value is one that could not be decrypted, so it is not carried over either.
+    /// </remarks>
+    private async Task<Dictionary<string, string>> KeepConnectorSessionSecretsAsync(
+        string connectorName, Dictionary<string, string> secrets, CancellationToken ct)
+    {
+        if (!ConnectorSessionSecretKeys.TryGetValue(ConnectorNames.Canonical(connectorName), out var sessionKeys))
+            return secrets;
+
+        var suppliesRefreshToken = secrets.Any(s =>
+            !string.IsNullOrEmpty(s.Value)
+            && string.Equals(s.Key.Replace("_", ""), "refreshtoken", StringComparison.OrdinalIgnoreCase));
+        if (suppliesRefreshToken)
+            return secrets;
+
+        var stored = await _configService.GetSecretsAsync(connectorName, ct);
+        var merged = new Dictionary<string, string>(secrets);
+        foreach (var key in sessionKeys)
+        {
+            if (!merged.ContainsKey(key) && stored.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value))
+                merged[key] = value;
+        }
+
+        return merged;
     }
 
     /// <summary>
