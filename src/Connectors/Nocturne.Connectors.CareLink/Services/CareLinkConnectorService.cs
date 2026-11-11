@@ -94,6 +94,12 @@ public class CareLinkConnectorService : BaseConnectorService<CareLinkConnectorCo
         if (!await AuthenticateWithConfigAsync(config))
             return AuthenticationFailedResult();
 
+        // Auth0 rotates the refresh token on every redemption and refuses the old one, and the token
+        // cache drops the rotated token with the access token it came with. Store it before anything
+        // else in the sync can return early or throw, or the next refresh replays the old token and
+        // only an interactive sign-in can recover.
+        await PersistRefreshTokenIfChangedAsync(cancellationToken);
+
         if (string.IsNullOrEmpty(_accessToken))
         {
             _logger.LogError("[{ConnectorSource}] No access token available — authentication must succeed before sync", ConnectorSource);
@@ -122,9 +128,6 @@ public class CareLinkConnectorService : BaseConnectorService<CareLinkConnectorCo
         await PublishDeviceStatusStepAsync(data, config, activeTypes, now, result, cancellationToken);
         await PublishAlarmStepAsync(data, config, activeTypes, now, result, cancellationToken);
         await PublishTreatmentsStepAsync(data, config, activeTypes, now, result, cancellationToken);
-
-        // Persist refresh token if it changed during sync
-        await PersistRefreshTokenIfChangedAsync(cancellationToken);
 
         return result;
     }
